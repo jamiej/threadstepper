@@ -15,7 +15,15 @@ from PIL import Image, ImageTk
 from ui.system import refresh_system_info, full_reset
 from ui.options import parse_settings_options, update_settings_content, save_settings
 from ui.errors import clear_error_log, monitor_error_status, update_error_log, toggle_error_log, show_error_log, update_error_status
-from ui.clocks import reset_clock_speed, monitor_clock_speed, update_clock_speed
+from ui.clocks import (
+    reset_clock_speed,
+    monitor_clock_speed,
+    update_clock_speed,
+    update_clocks,
+    update_ccx_summary,
+    load_clocks_data,
+    show_per_core_clocks_dialog,
+)
 from ui.logs import export_log, log_message, clear_output
 from ui.dependencies import install_dependencies
 
@@ -182,6 +190,7 @@ class StressTestGUI:
         clock_frame.columnconfigure(0, weight=1)
         clock_frame.rowconfigure(0, weight=1)
         clock_frame.rowconfigure(1, weight=0)
+        clock_frame.rowconfigure(2, weight=0)
 
         self.clock_label = tk.Label(
             clock_frame, 
@@ -195,9 +204,24 @@ class StressTestGUI:
         )
         self.clock_label.grid(row=0, column=0, sticky="nsew")
 
+        # Compact per-CCX highest summary (populated by update_clocks / load_clocks_data)
+        self.ccx_summary_label = ttk.Label(
+            clock_frame,
+            text="Per CCX: (no data)",
+            font=("Segoe UI", 9),
+            foreground="#495057",
+        )
+        self.ccx_summary_label.grid(row=1, column=0, sticky="w", padx=5, pady=(2, 2))
+        # Initial population (full_reset right after will also refresh via update_clocks)
+        try:
+            update_ccx_summary(self)
+        except Exception:
+            pass
+
         clock_btn_frame = ttk.Frame(clock_frame)
-        clock_btn_frame.grid(row=1, column=0, sticky="e", pady=(5,0))
-        ttk.Button(clock_btn_frame, text="🔁 Refresh", bootstyle="success-outline", command=lambda: update_clock_speed(self)).pack(side="right", padx=2)
+        clock_btn_frame.grid(row=2, column=0, sticky="e", pady=(5,0))
+        ttk.Button(clock_btn_frame, text="📊 Details", bootstyle="success-outline", command=lambda: show_per_core_clocks_dialog(self)).pack(side="right", padx=2)
+        ttk.Button(clock_btn_frame, text="🔁 Refresh", bootstyle="success-outline", command=lambda: update_clocks(self)).pack(side="right", padx=2)
         ttk.Button(clock_btn_frame, text="❎ Clear", bootstyle="success-outline", command=lambda: reset_clock_speed(self)).pack(side="right", padx=2)
 
         # Error Logs
@@ -411,6 +435,10 @@ def main():
     if not os.path.exists("./logs/clock.log"):
         with open("./logs/clock.log", 'w') as f:
             f.write("4.2 GHz (Highest Recorded)")
+    
+    if not os.path.exists("./logs/clocks.log"):
+        with open("./logs/clocks.log", 'w') as f:
+            f.write("GLOBAL=0\n")
     
     if not os.path.exists("./logs/errors.log"):
         with open("./logs/errors.log", 'w') as f:

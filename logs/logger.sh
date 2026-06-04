@@ -4,24 +4,132 @@
 CURRENT_DIR=$(pwd)
 ERROR_LOG="$CURRENT_DIR/logs/errors.log"
 CLOCK_LOG="$CURRENT_DIR/logs/clock.log"
+CLOCKS_LOG="$CURRENT_DIR/logs/clocks.log"
 START_TIME=$(date +%s)
 
 mkdir -p "$CURRENT_DIR/logs"
 echo "0" > "$CLOCK_LOG"
 echo "false" > "$ERROR_LOG"
+: > "$CLOCKS_LOG"
+
+# Per-run max trackers (populated by discover + updated in sampling loop)
+declare -A CPU_MAX CCX_MAX CPU_TO_CCX CCX_CORES
+
+discover_topology() {
+  local n
+  n=$(nproc 2>/dev/null || echo 1)
+  local -A l3_to_ccx=()
+  local ccx_id=0
+  local cpu shared key
+  for ((cpu=0; cpu<n; cpu++)); do
+    shared=""
+    # Prefer the L3 cache shared list (index3 on most AMD systems)
+    if [[ -r "/sys/devices/system/cpu/cpu${cpu}/cache/index3/shared_cpu_list" ]]; then
+      shared=$(<"/sys/devices/system/cpu/cpu${cpu}/cache/index3/shared_cpu_list")
+    else
+      # Fallback: pick the last index* that contains a comma-separated list (L3)
+      for idx in /sys/devices/system/cpu/cpu${cpu}/cache/index*/shared_cpu_list; do
+        [[ -r "$idx" ]] || continue
+        local val
+        val=$(<"$idx")
+        if [[ "$val" == *","* ]]; then
+          shared="$val"
+        fi
+      done
+    fi
+    [[ -z "$shared" ]] && shared="$cpu"
+
+    # Canonical key: sorted comma list
+    key=$(echo "$shared" | tr ',' '\n' | sort -n | paste -sd, - | sed 's/,$//')
+
+    if [[ -z "${l3_to_ccx[$key]}" ]]; then
+      l3_to_ccx[$key]=$ccx_id
+      CCX_CORES[$ccx_id]="$key"
+      CCX_MAX[$ccx_id]=0
+      ((ccx_id++))
+    fi
+    CPU_TO_CCX[$cpu]=${l3_to_ccx[$key]}
+    CPU_MAX[$cpu]=0
+  done
+}
 
 loggerCpuClock() {
-  max=0
-  for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq; do
-    v=$(<"$f")
-    (( v > max )) && max=$v
+  local n cpu khz ghz prev cc
+  n=$(nproc 2>/dev/null || echo 1)
+
+  # Load baselines from clocks.log (so external resets / Clears are picked up)
+  if [[ -f "$CLOCKS_LOG" ]]; then
+    while IFS='=' read -r k v || [[ -n "$k" ]]; do
+      k=${k//[[:space:]]/}
+      v=${v//[[:space:]]/}
+      [[ -z "$k" || -z "$v" ]] && continue
+      case "$k" in
+        GLOBAL) ;;
+        CPU[0-9]*)
+          cpu=${k#CPU}
+          CPU_MAX[$cpu]="$v"
+          ;;
+        CCX[0-9]*)
+          # only plain CCX<N>, not the MAP lines
+          if [[ "$k" != CCX_FOR* && "$k" != CORES_IN* ]]; then
+            cc=${k#CCX}
+            CCX_MAX[$cc]="$v"
+          fi
+          ;;
+      esac
+    done < "$CLOCKS_LOG"
+  fi
+
+  local live_global=0
+
+  for ((cpu=0; cpu<n; cpu++)); do
+    local f="/sys/devices/system/cpu/cpu${cpu}/cpufreq/scaling_cur_freq"
+    [[ -r "$f" ]] || continue
+    khz=$(<"$f")
+    ghz=$(awk "BEGIN { printf \"%.3f\", $khz / 1000000 }")
+
+    # Per-CPU max
+    prev=${CPU_MAX[$cpu]:-0}
+    if awk -v cur="$ghz" -v last="$prev" 'BEGIN { exit !(cur > last) }'; then
+      CPU_MAX[$cpu]="$ghz"
+    fi
+
+    # Track live global for classic clock.log
+    if awk -v cur="$ghz" -v last="$live_global" 'BEGIN { exit !(cur > last) }'; then
+      live_global="$ghz"
+    fi
+
+    # Per-CCX max
+    cc=${CPU_TO_CCX[$cpu]:-0}
+    prev=${CCX_MAX[$cc]:-0}
+    if awk -v cur="$ghz" -v last="$prev" 'BEGIN { exit !(cur > last) }'; then
+      CCX_MAX[$cc]="$ghz"
+    fi
   done
-  ghz=$(awk "BEGIN { printf \"%.3f\", $max / 1000000 }")
-  last=$(<"$CLOCK_LOG")
-  awk -v cur="$ghz" -v last="$last" 'BEGIN { exit !(cur > last) }' && {
-    printf "%s\n" "$ghz" > "$CLOCK_LOG"
-  }
+
+  # Always update the classic single-value file (compat with existing driver prints + old GUI)
+  printf "%.3f\n" "$live_global" > "$CLOCK_LOG"
+
+  # Write rich per-core / per-CCX data (source of truth for new UI)
+  {
+    printf "GLOBAL=%.3f\n" "$live_global"
+    for ((cpu=0; cpu<n; cpu++)); do
+      printf "CPU%d=%s\n" "$cpu" "${CPU_MAX[$cpu]:-0}"
+    done
+    for cc in "${!CCX_MAX[@]}"; do
+      printf "CCX%d=%s\n" "$cc" "${CCX_MAX[$cc]}"
+    done
+    for ((cpu=0; cpu<n; cpu++)); do
+      printf "CCX_FOR_CPU%d=%s\n" "$cpu" "${CPU_TO_CCX[$cpu]:-0}"
+    done
+    for cc in "${!CCX_CORES[@]}"; do
+      printf "CORES_IN_CCX%d=%s\n" "$cc" "${CCX_CORES[$cc]}"
+    done
+  } > "$CLOCKS_LOG"
 }
+
+# Discover CCX topology once when the logger starts (before the sampling loop)
+discover_topology
 
 loggerErrorCheck() {
   LOG_PRIORITY="err"

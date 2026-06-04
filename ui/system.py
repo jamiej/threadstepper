@@ -3,7 +3,7 @@ import platform
 
 from ui.logs import log_message, clear_output
 from ui.errors import clear_error_log, update_error_log, update_error_status
-from ui.clocks import update_clock_speed
+from ui.clocks import update_clocks
 
 def refresh_system_info(self):
     import psutil
@@ -46,12 +46,14 @@ def full_reset(self):
         f.write("false")
     with open("./logs/clock.log", "w") as f:
         f.write("0")
+    with open("./logs/clocks.log", "w") as f:
+        f.write("GLOBAL=0\n")
     with open("./logs/output.log", "w") as f:
         f.write("-- STARTUP --")
 
     clear_error_log(self)
     clear_output(self)
     refresh_system_info(self)
-    update_clock_speed(self)
+    update_clocks(self)
     update_error_log(self)
     update_error_status(self)

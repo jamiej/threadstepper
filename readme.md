@@ -8,7 +8,8 @@ Designed specifically for testing undervolting and boost stability, where conven
 
 - New GUI interface!
 - Better live error checking.
-- Logging of highest CPU clocks.
+- Per-core and per-CCX highest clock tracking (with live summary + details dialog).
+- Logging of highest CPU clocks (global, plus per-core and per-CCX).
 - Improved CPU topology testing.
 - Improved settings and install.sh script.
 - Improved testing methods for faster error detection.
