@@ -33,7 +33,7 @@ class StressTestGUI:
         self.root = root
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.title("Thread Stepper (2.5)")
-        self.root.geometry("800x1040")
+        self.root.geometry("880x1040")  # slightly wider default to help long Per-CCX summary on 8+ CCX machines; user can resize further
         
         self.process = None
         self.is_running = False
@@ -78,8 +78,14 @@ class StressTestGUI:
         self.root.rowconfigure(0, weight=1)
         main_container.columnconfigure(0, weight=1)
         main_container.columnconfigure(1, weight=1)
+        # Row weights tuned for resize: give most extra vertical space to the test output log (row 4).
+        # Top area (row 1) and middle status/clock (row 2) stay at natural height so they don't get stretched oddly.
+        # This helps on tall windows and machines with many CCXs (user can also widen horizontally to see full Per-CCX summary).
         for i in range(8):
-            main_container.rowconfigure(i, weight=1 if i in [1,4] else 0)
+            if i == 4:
+                main_container.rowconfigure(i, weight=1)
+            else:
+                main_container.rowconfigure(i, weight=0)
 
         # Header
         install_frame = ttk.Frame(main_container)
@@ -205,13 +211,16 @@ class StressTestGUI:
         self.clock_label.grid(row=0, column=0, sticky="nsew")
 
         # Compact per-CCX highest summary (populated by update_clocks / load_clocks_data)
+        # Uses wrap + ew so it gracefully handles 8+ CCXs on high-core machines (e.g. 64c/128t).
+        # Full list always available in the Details dialog.
         self.ccx_summary_label = ttk.Label(
             clock_frame,
             text="Per CCX: (no data)",
             font=("Segoe UI", 9),
             foreground="#495057",
+            wraplength=420,
         )
-        self.ccx_summary_label.grid(row=1, column=0, sticky="w", padx=5, pady=(2, 2))
+        self.ccx_summary_label.grid(row=1, column=0, sticky="ew", padx=5, pady=(2, 2))
         # Initial population (full_reset right after will also refresh via update_clocks)
         try:
             update_ccx_summary(self)
@@ -445,7 +454,7 @@ def main():
             f.write("False\n")
     
     root = tb.Window(themename="flatly") 
-    root.resizable(False, False)
+    root.resizable(True, True)  # allow resize to accommodate many CCXs (e.g. 8+ on high-core Threadripper/EPYC) and long logs
     icon = PhotoImage(file="favicon.png")
     root.iconphoto(True, icon)
     app = StressTestGUI(root)

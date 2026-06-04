@@ -139,11 +139,12 @@ def update_ccx_summary(self):
         if not ccxs:
             self.ccx_summary_label.config(text="Per CCX: (no data)")
             return
-        parts = []
-        for ccx_id in sorted(ccxs.keys()):
-            val = ccxs[ccx_id]
-            parts.append(f"CCX{ccx_id}: {val}")
-        text = "Per CCX:  " + "   ".join(parts)
+        n = len(ccxs)
+        # Compact format to accommodate many CCXs (e.g. 8 on 64c/128t machines).
+        # "Per CCX (8): 0:4.850 1:4.847 ..."  -- no repeated "CCX" prefix saves space.
+        # Wraplength + resizable window lets user see full list; Details dialog has the complete table.
+        items = [f"{k}:{v}" for k, v in sorted(ccxs.items())]
+        text = f"Per CCX ({n}): " + " ".join(items)
         self.ccx_summary_label.config(text=text)
     except Exception:
         try:
@@ -169,7 +170,7 @@ def show_per_core_clocks_dialog(self):
 
         dlg = tk.Toplevel()
         dlg.title("Per-Core & Per-CCX Highest Clocks")
-        dlg.geometry("520x420")
+        dlg.geometry("620x520")
         dlg.resizable(True, True)
 
         # Summary header
@@ -186,7 +187,7 @@ def show_per_core_clocks_dialog(self):
 
         # Treeview table
         cols = ("Core", "CCX", "Highest (GHz)")
-        tree = ttk.Treeview(dlg, columns=cols, show="headings", height=16)
+        tree = ttk.Treeview(dlg, columns=cols, show="headings", height=24)  # taller default for high thread count machines (64c/128t); full scrollbar support
         tree.heading("Core", text="Core")
         tree.heading("CCX", text="CCX")
         tree.heading("Highest (GHz)", text="Highest (GHz)")
